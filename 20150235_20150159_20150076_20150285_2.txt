@@ -1,0 +1,308 @@
+import sqlite3
+import timeit
+
+start_time = timeit.default_timer()
+conn = sqlite3.connect('data.sqlite')
+cur = conn.cursor()
+
+cur.execute('''SELECT DISTINCT startpage FROM edges''')# get all distinct ids of pages from which edge is starting and store them in list named start_id
+start_ids = list()
+for row in cur: 
+    start_ids.append(row[0])
+
+print(start_ids)
+beta=0.8
+end_ids = list()#stores all distinct ids of pages where edges are pointing to
+edges = list()#stores all edges
+cur.execute('''SELECT DISTINCT startpage, finalpage FROM edges''')
+for row in cur:
+    start_id = row[0]
+    end_id = row[1]
+    edges.append(row)
+    if (end_id not in end_ids) : 
+        end_ids.append(end_id)
+print(start_ids)
+oldranks = dict()#stores older ranks of all nodes
+for i in start_ids:
+    cur.execute('''SELECT nrank FROM nodes WHERE id = ?''', (i, ))
+    row = cur.fetchone()
+    oldranks[i] = row[0]
+
+for i in end_ids:
+    cur.execute('''SELECT nrank FROM nodes WHERE id = ?''', (i, ))
+    row = cur.fetchone()
+    if row is None :
+        continue
+    oldranks[i] = row[0]
+print(oldranks)
+print(edges)
+# for implementing topic specific search
+topics = list()# list that will contain topic_id for topic specific search
+topic_specific = input('if you want topic specific search, type 1, else print 0') #get input for number of specific topics
+if(int(topic_specific)==1):#if it is specific search
+    num_specific_topics = input('number of specific_topics you want??') #get input for number of specific topics
+    for i in range(int(num_specific_topics)):
+        a = input('type topic_id for topic specific search:')
+        if (int(a) not in topics) : 
+            topics.append(int(a))
+    print(topics)
+    iter_num = input('iterations??:') #get input for number of iteration to run until r converges
+    iter_num = int(iter_num)
+
+    for i in range(iter_num):
+    #calculate total rank of all nodes which are topic_specific
+        newranks = dict();#will store new ranks of all nodes after calculation
+        total = 0.0#variable to store total sum of old ranks of all nodes
+        for (node, oldrank) in list(oldranks.items()):
+            if (int(node) in topics):
+                total = total + oldrank  
+            newranks[node] = 0.0
+
+        for (nodeid, oldrank) in list(oldranks.items()):
+
+            end2_ids = list()#variable to store all page ids that particular page is pointing to
+            for (start_id, end_id) in edges:
+                if start_id != nodeid : continue
+                end2_ids.append(end_id)
+            if(len(end2_ids)==0): continue
+            amount = beta*(oldrank / len(end2_ids))#value that node with id nodeid will add to nodes it is pointing to
+        
+            for id in end2_ids:# add rank that node with id nodeid adds
+                newranks[id] += amount
+        
+        newtot = 0#variable to store total sum of new ranks of all nodes
+        for (node, newrank) in list(newranks.items()):
+            if(node in topics):
+                newtot = newtot + newrank
+        leak = (total - newtot) / len(topics)#leaked PageRank(1-s/|s|)
+
+        for oo in newranks:#re-insert the leaked PageRank(1-s/N) to nodes thatare topic specific
+            if(oo in topics):
+                newranks[oo] = newranks[oo] + leak
+
+        newtot = 0#variable to store total sum of new ranks of all nodes
+        for (node, newrank) in list(newranks.items()):
+            newtot = newtot + newrank
+
+        totdiff = 0#variable to store sum of difference of new ranks and old ranks of all nodes
+        for (node, oldrank) in list(oldranks.items()):
+            newrank = newranks[node]
+            diff = abs(oldrank-newrank)
+            totdiff = totdiff + diff
+
+        avediff = totdiff / len(oldranks)
+        print(i,avediff)
+        oldranks = newranks#re-initialize newranks to oldranks for next loop
+
+
+    print(list(newranks.items()))
+    #now update value of old and new ranks in node table after desired iterations
+    cur.execute('''UPDATE nodes SET orank=nrank''')
+    for (id, newrank) in list(newranks.items()) :
+        cur.execute('''UPDATE nodes SET nrank=? WHERE id=?''', (newrank, id))
+    conn.commit()#save changes in database
+    cur.close()#close database
+    elapsed = timeit.default_timer() - start_time
+    print("Time Elapsed:")
+    print(elapsed)
+if(int(topic_specific)==0):#if not specific search
+    
+    iter_num = input('iterations??:') #get input for number of iteration to run until r converges
+    iter_num = int(iter_num)
+
+    for i in range(iter_num):
+    #calculate total rank of all nodes which are topic_specific
+        newranks = dict();#will store new ranks of all nodes after calculation
+        total = 0.0#variable to store total sum of old ranks of all nodes
+        for (node, oldrank) in list(oldranks.items()):
+            total = total + oldrank  
+            newranks[node] = 0.0
+
+        for (nodeid, oldrank) in list(oldranks.items()):
+            amount=0
+            end2_ids = list()#variable to store all page ids that particular page is pointing to
+            for (start_id, end_id) in edges:
+                if start_id != nodeid : continue
+                end2_ids.append(end_id)
+            if(len(end2_ids)==0): continue
+            amount = beta*(oldrank / len(end2_ids))#value that node with id nodeid will add to nodes it is pointing to
+        
+            for id in end2_ids:# add rank that node with id nodeid adds
+                newranks[id] += amount
+        
+        newtot = 0#variable to store total sum of new ranks of all nodes
+        for (node, newrank) in list(newranks.items()):
+            newtot = newtot + newrank
+        leak = (total - newtot) / len(newranks)#leaked PageRank(1-s/|s|)
+
+        for oo in newranks:#re-insert the leaked PageRank(1-s/N) to nodes thatare topic specific
+            newranks[oo] = newranks[oo] + leak
+
+        newtot = 0#variable to store total sum of new ranks of all nodes
+        for (node, newrank) in list(newranks.items()):
+            newtot = newtot + newrank
+
+        totdiff = 0#variable to store sum of difference of new ranks and old ranks of all nodes
+        for (node, oldrank) in list(oldranks.items()):
+            newrank = newranks[node]
+            diff = abs(oldrank-newrank)
+            totdiff = totdiff + diff
+
+        avediff = totdiff / len(oldranks)
+        print(i,avediff)
+        oldranks = newranks#re-initialize newranks to oldranks for next loop
+
+
+    print(list(newranks.items()))
+    #now update value of old and new ranks in node table after desired iterations
+    cur.execute('''UPDATE nodes SET orank=nrank''')
+    for (id, newrank) in list(newranks.items()) :
+        cur.execute('''UPDATE nodes SET nrank=? WHERE id=?''', (newrank, id))
+    conn.commit()#save changes in database
+    cur.close()#close database
+    elapsed = timeit.default_timer() - start_time
+    print("Time Elapsed:")
+    print(elapsed)
+
+****************************************************************	
+import sqlite3
+import timeit
+
+start_time = timeit.default_timer()
+conn = sqlite3.connect('data.sqlite')
+cur = conn.cursor()
+cur.execute('''CREATE TABLE IF NOT EXISTS nodes(id INTEGER PRIMARY KEY,orank REAL, nrank REAL)''')#create table nmaed nodes with attributes id(for storing page id), orank(for storing previous rank of page), and nrank(for storing current rank of page)
+l = 0
+cur.execute('''CREATE TABLE IF NOT EXISTS edges(startpage INTEGER,finalpage INTEGER)''')#create table nmaed edges with attributes startpage(for storing id for page from where edge startrs), finalpage(for storing id for page that egde is pointing to)
+with open('p2p-Gnutella04.txt', 'r') as f:#read data
+    for line in f:#loop for every line in data
+        y = line.split()
+        print(l)
+        l += 1
+        start_id = int(y[0])#for storing id for page from where edge startrs
+        end_id = int(y[1])#for storing id for page that egde is pointing to
+        cur.execute('SELECT * FROM nodes WHERE id=?' , (start_id,))
+        row = cur.fetchone()
+        if(row is None) :
+            cur.execute('INSERT OR IGNORE INTO nodes ( id, orank, nrank) VALUES ( ?, 0.0 , 1.0 )' , (start_id,))
+        cur.execute('INSERT OR IGNORE INTO edges (startpage, finalpage) VALUES ( ?, ? )', ( start_id, end_id ))
+        conn.commit()#save changes in database
+        cur.execute('SELECT * FROM nodes WHERE id=?' , (end_id,))
+        row = cur.fetchone()
+        if(row is None) :
+            cur.execute('INSERT OR IGNORE INTO nodes ( id, orank, nrank) VALUES ( ?, 0.0 , 1.0 )' , (end_id,))
+        conn.commit()#save changes in database
+cur.execute('''SELECT COUNT(*) AS c from nodes''')
+row = cur.fetchone()
+total=row[0]
+cur.execute('''SELECT * FROM nodes''')
+new_rank=1.0/total
+cur.execute('''UPDATE nodes SET nrank=?''', (new_rank, ))
+conn.commit()#save changes in database
+cur.close()#close database
+elapsed = timeit.default_timer() - start_time
+print("Time Elapsed:")
+print(elapsed)
+
+import sqlite3
+#from graph_tool.all import *
+from igraph import *
+import timeit
+
+start_time = timeit.default_timer()
+conn = sqlite3.connect('data.sqlite')
+cur = conn.cursor()
+
+cur.execute('''SELECT DISTINCT startpage FROM edges''')# get all distinct ids of pages from which edge is starting and store them in list named start_id
+start_ids = list()
+for row in cur: 
+    start_ids.append(row[0])
+
+beta=0.8
+end_ids = list()#stores all distinct ids of pages where edges are pointing to
+edges = list()#stores all edges
+cur.execute('''SELECT DISTINCT startpage, finalpage FROM edges''')
+for row in cur:
+    start_id = row[0]
+    end_id = row[1]
+    edges.append(row)
+    if (end_id not in end_ids) : 
+        end_ids.append(end_id)
+
+k = input('type no. of nodes you want in graph:' )
+k=int(k)
+oldranks = dict()#stores older ranks of all nodes
+nod=list()
+for i in start_ids:
+    cur.execute('''SELECT nrank FROM nodes WHERE id = ?''', (i, ))
+    row = cur.fetchone()
+    oldranks[i] = row[0]
+    if (i not in nod and i<k) : 
+        nod.append(i)
+for i in end_ids:
+    cur.execute('''SELECT nrank FROM nodes WHERE id = ?''', (i, ))
+    row = cur.fetchone()
+    oldranks[i] = row[0]
+    if (i not in nod and i<k) : 
+        nod.append(i)
+edges=list()
+cur.execute('''SELECT id FROM nodes ORDER BY id DESC LIMIT 1''')
+row = cur.fetchone()
+total=row[0]
+for (node, oldrank) in list(oldranks.items()):
+    cur.execute('''SELECT DISTINCT startpage, finalpage FROM edges WHERE startpage = ?''', (node, ))
+    row = cur.fetchone()
+    if row is None :
+        continue
+    for (row in cur and row[0]<k and row[1]<k):
+        edges.append((row[0],row[1]))
+print(edges)
+g = Graph(edges=edges, directed=True)
+
+visual_style = {}
+
+# Scale vertices based on degree
+ranks=list()
+for i in range(k):
+    if (i in nod):
+        ranks.append(oldranks[i])
+    else:
+        ranks.append(0)
+visual_style["vertex_size"] = [200*x for x in ranks]
+print(visual_style["vertex_size"])
+# Set bbox and margin
+visual_style["bbox"] = (800,800)
+visual_style["margin"] = 100
+
+****************************************************************
+
+plot(g, **visual_style)
+cur.close()#close database
+
+elapsed = timeit.default_timer() - start_time
+print("Time Elapsed:")
+print(elapsed)
+
+import sqlite3
+import timeit
+
+start_time = timeit.default_timer()
+conn = sqlite3.connect('data.sqlite')
+cur = conn.cursor()
+
+cur.execute('''SELECT COUNT(*) AS c from nodes''')
+row = cur.fetchone()
+total=row[0]
+print("total no. of nodes in our rank system are:")
+print(total)
+
+cur.execute('''SELECT * FROM nodes''')
+new_rank=1.0/total
+cur.execute('''UPDATE nodes SET nrank=?, orank=0.0''', (new_rank, ))#All pages re-initialized and set to a rank of 1.0/N
+conn.commit()#save changes in database
+cur.close()#close database
+
+print("All pages set to a rank of 1.0")
+elapsed = timeit.default_timer() - start_time
+print("Time Elapsed:")
+print(elapsed)
